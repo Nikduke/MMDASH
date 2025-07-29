@@ -191,6 +191,9 @@ def build_layout() -> html.Div:
         "lg-rms-graph",
         "ll-rms-graph",
         "tov-dur-graph",
+        "v0-graph",
+        "lg-uv-graph",
+        "ll-uv-graph",
     ]
     graph_titles = [
         "LG instantaneous overvoltages",
@@ -198,6 +201,9 @@ def build_layout() -> html.Div:
         "LG RMS overvoltages",
         "LL RMS overvoltages",
         "TOV duration",
+        "Initial Voltage [pu] vs Switching Time",
+        "LG RMS Undervoltage [pu] vs Switching Time",
+        "LL RMS Undervoltage [pu] vs Switching Time",
     ]
     graphs = []
     for g_id, title in zip(graph_ids, graph_titles):
@@ -253,6 +259,9 @@ def main() -> None:
             Output("lg-rms-graph", "figure"),
             Output("ll-rms-graph", "figure"),
             Output("tov-dur-graph", "figure"),
+            Output("v0-graph", "figure"),
+            Output("lg-uv-graph", "figure"),
+            Output("ll-uv-graph", "figure"),
         ],
         [
             Input("case-filter", "value"),
@@ -368,6 +377,11 @@ def main() -> None:
         fig_lg_rms = build_fig("LGr [pu]", "LGr [pu]")
         fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
         fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
+        fig_v0 = build_fig("LLs [pu]", "V0 [pu]")
+        df_range["LG_UV"] = 1 - df_range["LGr [pu]"]
+        df_range["LL_UV"] = 1 - df_range["LLr [pu]"]
+        fig_lg_uv = build_fig("LG_UV", "1 - LGr [pu]")
+        fig_ll_uv = build_fig("LL_UV", "1 - LLr [pu]")
 
         return (
             kpi_table,
@@ -376,6 +390,9 @@ def main() -> None:
             fig_lg_rms,
             fig_ll_rms,
             fig_tov,
+            fig_v0,
+            fig_lg_uv,
+            fig_ll_uv,
         )
 
     # Run the server
