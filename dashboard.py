@@ -269,20 +269,18 @@ def main() -> None:
             ],
             Input("refresh-button", "n_clicks"),
         ],
-        State("case-filter", "value"),
     )
     def update_case_options(*args):
-        *parts, _n_clicks, current_vals = args
+        *parts, _n_clicks = args
         ctx = callback_context
         if ctx.triggered and ctx.triggered[0]["prop_id"] == "refresh-button.n_clicks":
             dm.refresh_data()
         selected = {i: set(p) for i, p in enumerate(parts) if p}
         allowed_cases = dm.filter_cases_by_parts(selected)
         options = [{"label": c, "value": c} for c in allowed_cases]
-        if current_vals:
-            new_vals = [c for c in current_vals if c in allowed_cases]
-        else:
-            new_vals = allowed_cases
+        # Always select all allowed cases by default so that the
+        # case dropdown stays in sync with the part filters.
+        new_vals = allowed_cases
         return options, new_vals
 
     @app.callback(
@@ -293,6 +291,8 @@ def main() -> None:
         Input("refresh-button", "n_clicks"),
     )
     def refresh_case_parts(n_clicks):
+        if n_clicks:
+            dm.refresh_data()
         token_opts, _ = dm.get_case_token_info()
         return [
             [{"label": v, "value": v} for v in token_opts[i - 1]]
@@ -342,8 +342,10 @@ def main() -> None:
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
         }
         df = dm.get_data()
-        df_range = df[df["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])]
-        df_range = dm._apply_filters(df_range, filters)
+        df_range = dm._apply_filters(df, filters)
+        df_range = df_range[
+            df_range["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])
+        ]
         if df_range.empty:
             return (
                 create_kpi_table([]),
@@ -396,10 +398,10 @@ def main() -> None:
         }
         x_col = "Run#" if xaxis_choice == "Run#" else "Tswitch_a [s]"
         grouped = (
-            df_range.groupby(["Case_Bus", x_col])
+            df_range.groupby(["Case_Bus", x_col], as_index=False)
             .agg(agg_cols)
-            .reset_index()
             .rename(columns={x_col: "x"})
+            .sort_values(["Case_Bus", "x"])
         )
 
         def build_fig(col: str, y_label: str) -> go.Figure:
