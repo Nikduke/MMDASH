@@ -138,3 +138,29 @@ def test_get_filter_options_keys():
         "Tswitch_c [s]",
     }
     assert set(options.keys()) == expected_keys
+
+
+def test_get_initial_voltage():
+    df = dm.get_data()
+    pivot = dm.get_initial_voltage("Run#")
+    expected = df.groupby(["Run#", "Bus name"])["LLs [pu]"].max().unstack()
+    expected = expected.reindex(index=pivot.index, columns=pivot.columns)
+    assert pivot.equals(expected)
+
+
+def test_get_lg_undervoltage():
+    df = dm.get_data().copy()
+    df["LG_UV"] = 1 - df["LGr [pu]"]
+    pivot = dm.get_lg_undervoltage("Run#")
+    expected = df.groupby(["Run#", "Bus name"])["LG_UV"].max().unstack()
+    expected = expected.reindex(index=pivot.index, columns=pivot.columns)
+    assert pivot.equals(expected)
+
+
+def test_get_ll_undervoltage():
+    df = dm.get_data().copy()
+    df["LL_UV"] = 1 - df["LLr [pu]"]
+    pivot = dm.get_ll_undervoltage("Run#")
+    expected = df.groupby(["Run#", "Bus name"])["LL_UV"].max().unstack()
+    expected = expected.reindex(index=pivot.index, columns=pivot.columns)
+    assert pivot.equals(expected)
