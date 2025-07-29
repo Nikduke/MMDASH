@@ -329,7 +329,7 @@ def main() -> None:
 
         kpi_table = create_kpi_table(kpi_rows)
 
-        # Generate figures
+        # Generate figures grouped by Case_Bus (case + bus)
         def build_fig(col: str, y_label: str) -> go.Figure:
             fig = go.Figure()
             for case_bus, group in df_range.groupby("Case_Bus"):
@@ -372,16 +372,58 @@ def main() -> None:
             )
             return fig
 
+        # Figures grouped only by bus name (for initial voltage & undervoltage)
+        def build_bus_fig(col: str, y_label: str) -> go.Figure:
+            fig = go.Figure()
+            for bus, group in df_range.groupby("Bus name"):
+                d = (
+                    group.groupby(xaxis_choice)
+                    .agg({col: "max", "Run#": "first", "Case name": "first"})
+                    .reset_index()
+                    .sort_values(xaxis_choice)
+                )
+                customdata = np.stack(
+                    [
+                        d["Case name"],
+                        np.full(len(d), bus),
+                        d["Run#"],
+                    ],
+                    axis=-1,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=d[xaxis_choice],
+                        y=d[col],
+                        mode="lines+markers",
+                        name=bus,
+                        customdata=customdata,
+                        hovertemplate="Case name: %{customdata[0]}<br>"
+                        "Bus name: %{customdata[1]}<br>"
+                        "Run#: %{customdata[2]}<br>"
+                        + y_label
+                        + ": %{y:.3f}<extra></extra>",
+                    )
+                )
+            fig.update_layout(
+                xaxis_title=xaxis_choice,
+                yaxis_title=y_label,
+                legend_title="Bus name",
+                height=400,
+                margin=dict(l=40, r=20, t=40, b=40),
+            )
+            return fig
+
         fig_lg_inst = build_fig("LGp [pu]", "LGp [pu]")
         fig_ll_inst = build_fig("LLp [pu]", "LLp [pu]")
         fig_lg_rms = build_fig("LGr [pu]", "LGr [pu]")
         fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
         fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
-        fig_v0 = build_fig("LLs [pu]", "V0 [pu]")
+        value_col = "V0 [pu]" if "V0 [pu]" in df_range.columns else "LLs [pu]"
+        fig_v0 = build_bus_fig(value_col, "V0 [pu]")
         df_range["LG_UV"] = 1 - df_range["LGr [pu]"]
         df_range["LL_UV"] = 1 - df_range["LLr [pu]"]
-        fig_lg_uv = build_fig("LG_UV", "1 - LGr [pu]")
-        fig_ll_uv = build_fig("LL_UV", "1 - LLr [pu]")
+        fig_lg_uv = build_bus_fig("LG_UV", "1 - LGr [pu]")
+        fig_ll_uv = build_bus_fig("LL_UV", "1 - LLr [pu]")
 
         return (
             kpi_table,
