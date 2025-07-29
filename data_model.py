@@ -88,6 +88,13 @@ def get_data() -> pd.DataFrame:
     return df
 
 
+def refresh_data() -> None:
+    """Clear cached data and filter options."""
+    get_data.cache_clear()
+    get_filter_options.cache_clear()
+    _cached_bus_names.cache_clear()
+
+
 def _apply_filters(
     df: pd.DataFrame, filters: Optional[Dict[str, Iterable]] = None
 ) -> pd.DataFrame:

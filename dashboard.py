@@ -92,20 +92,6 @@ def build_layout() -> html.Div:
             ]
         )
     )
-    # Multi-select for Run#
-    controls.append(
-        html.Div(
-            [
-                html.Label("Run #"),
-                dcc.Dropdown(
-                    options=[{"label": str(v), "value": v} for v in options["Run#"]],
-                    value=options["Run#"],
-                    multi=True,
-                    id="run-filter",
-                ),
-            ]
-        )
-    )
     # Multi-select for Bus voltage
     controls.append(
         html.Div(
@@ -178,6 +164,7 @@ def build_layout() -> html.Div:
             ]
         )
     )
+    controls.append(html.Div(html.Button("Refresh", id="refresh-button")))
 
     # KPI container (empty, values filled via callback)
     kpi_container = html.Div(id="kpi-container", className="kpi-container")
@@ -200,8 +187,8 @@ def build_layout() -> html.Div:
         "LL RMS overvoltages",
         "TOV duration",
         "Initial Voltage [pu] vs Case_Bus",
-        "LG RMS Undervoltage [pu] vs Case_Bus",
-        "LL RMS Undervoltage [pu] vs Case_Bus",
+        "LG RMS Undervoltage [pu]",
+        "LL RMS Undervoltage [pu]",
     ]
     graphs = []
     for g_id, title in zip(graph_ids, graph_titles):
@@ -241,9 +228,10 @@ def main() -> None:
 
     @app.callback(
         [Output("bus-filter", "options"), Output("bus-filter", "value")],
-        Input("voltage-filter", "value"),
+        [Input("voltage-filter", "value"), Input("refresh-button", "n_clicks")],
     )
-    def update_bus_options(selected_voltages):
+    def update_bus_options(selected_voltages, n_clicks):
+        dm.refresh_data()
         bus_names = dm.get_bus_names_for_voltage(selected_voltages)
         opts = [{"label": b, "value": b} for b in bus_names]
         return opts, bus_names
@@ -264,28 +252,28 @@ def main() -> None:
         [
             Input("case-filter", "value"),
             Input("fault-filter", "value"),
-            Input("run-filter", "value"),
             Input("voltage-filter", "value"),
             Input("bus-filter", "value"),
             Input("tswitch-filter", "value"),
             Input("xaxis-toggle", "value"),
+            Input("refresh-button", "n_clicks"),
         ],
     )
     def update_all(
         case_vals,
         fault_vals,
-        run_vals,
         voltage_vals,
         bus_vals,
         tswitch_range,
         xaxis_choice,
+        n_clicks,
     ):
+        dm.refresh_data()
         # Build filters dict for data_model
         filters = {
             "Case name": set(case_vals) if case_vals else None,
             "Bus name": set(bus_vals) if bus_vals else None,
             "Fault_type": set(fault_vals) if fault_vals else None,
-            "Run#": set(run_vals) if run_vals else None,
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
         }
         df = dm.get_data()
@@ -419,8 +407,8 @@ def main() -> None:
         fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
         fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
         fig_v0 = build_case_fig("LLs [pu]", "V0 [pu]")
-        fig_lg_uv = build_case_fig("LG_UV", "1 - LGr [pu]")
-        fig_ll_uv = build_case_fig("LL_UV", "1 - LLr [pu]")
+        fig_lg_uv = build_fig("LG_UV", "1 - LGr [pu]")
+        fig_ll_uv = build_fig("LL_UV", "1 - LLr [pu]")
 
         return (
             kpi_table,
