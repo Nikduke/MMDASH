@@ -367,3 +367,70 @@ def get_bus_names_for_voltage(voltage_list: Optional[Iterable]) -> list:
     else:
         bus_names = df[df["Bus voltage [kV]"].isin(voltage_list)]["Bus name"].unique()
     return sorted(bus_names)
+
+
+def get_initial_voltage(
+    x_axis: str,
+    filters: Optional[Dict[str, Iterable]] = None,
+) -> pd.DataFrame:
+    """Return a pivot of initial voltages at fault inception.
+
+    Parameters
+    ----------
+    x_axis : {"Run#", "Tswitch_a [s]"}
+        Field to use for the row index of the pivot table.
+    filters : dict, optional
+        Optional filters applied before pivoting. Only the columns ``Case name``,
+        ``Bus voltage [kV]`` and ``Bus name`` are typically used.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Pivoted table with ``Bus name`` columns and initial voltage values.
+    """
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    value_col = "V0 [pu]" if "V0 [pu]" in df_filtered.columns else "LLs [pu]"
+    pivot = df_filtered.pivot_table(
+        index=x_axis,
+        columns="Bus name",
+        values=value_col,
+        aggfunc="max",
+    )
+    return pivot.sort_index()
+
+
+def get_lg_undervoltage(
+    x_axis: str,
+    filters: Optional[Dict[str, Iterable]] = None,
+) -> pd.DataFrame:
+    """Return a pivot of single-phase RMS undervoltages (1 - LGr)."""
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    df_filtered = df_filtered.copy()
+    df_filtered["LG_UV"] = 1 - df_filtered["LGr [pu]"]
+    pivot = df_filtered.pivot_table(
+        index=x_axis,
+        columns="Bus name",
+        values="LG_UV",
+        aggfunc="max",
+    )
+    return pivot.sort_index()
+
+
+def get_ll_undervoltage(
+    x_axis: str,
+    filters: Optional[Dict[str, Iterable]] = None,
+) -> pd.DataFrame:
+    """Return a pivot of line-to-line RMS undervoltages (1 - LLr)."""
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    df_filtered = df_filtered.copy()
+    df_filtered["LL_UV"] = 1 - df_filtered["LLr [pu]"]
+    pivot = df_filtered.pivot_table(
+        index=x_axis,
+        columns="Bus name",
+        values="LL_UV",
+        aggfunc="max",
+    )
+    return pivot.sort_index()
