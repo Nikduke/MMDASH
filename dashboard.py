@@ -19,11 +19,14 @@ Then open http://127.0.0.1:8050 in a web browser.
 
 from __future__ import annotations
 
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, State, callback_context
 import plotly.graph_objects as go
 
 import data_model as dm
 import numpy as np
+
+CASE_PART_OPTIONS, _ = dm.get_case_token_info()
+NUM_CASE_PARTS = len(CASE_PART_OPTIONS)
 
 
 def create_kpi_table(rows: list[dict]) -> html.Table:
@@ -64,6 +67,25 @@ def build_layout() -> html.Div:
 
     # Create dropdowns for each filter
     controls = []
+
+    case_parts, _ = dm.get_case_token_info()
+
+    # Slicers for each case name token
+    for idx, part_values in enumerate(case_parts, start=1):
+        controls.append(
+            html.Div(
+                [
+                    html.Label(f"Case Part {idx}"),
+                    dcc.Dropdown(
+                        options=[{"label": v, "value": v} for v in part_values],
+                        value=[],
+                        multi=True,
+                        id=f"case-part-{idx}-filter",
+                    ),
+                ]
+            )
+        )
+
     # Multi-select for Case name
     controls.append(
         html.Div(
@@ -231,10 +253,51 @@ def main() -> None:
         [Input("voltage-filter", "value"), Input("refresh-button", "n_clicks")],
     )
     def update_bus_options(selected_voltages, n_clicks):
-        dm.refresh_data()
+        ctx = callback_context
+        if ctx.triggered and ctx.triggered[0]["prop_id"] == "refresh-button.n_clicks":
+            dm.refresh_data()
         bus_names = dm.get_bus_names_for_voltage(selected_voltages)
         opts = [{"label": b, "value": b} for b in bus_names]
         return opts, bus_names
+
+    @app.callback(
+        [Output("case-filter", "options"), Output("case-filter", "value")],
+        [
+            *[
+                Input(f"case-part-{i}-filter", "value")
+                for i in range(1, NUM_CASE_PARTS + 1)
+            ],
+            Input("refresh-button", "n_clicks"),
+        ],
+        State("case-filter", "value"),
+    )
+    def update_case_options(*args):
+        *parts, _n_clicks, current_vals = args
+        ctx = callback_context
+        if ctx.triggered and ctx.triggered[0]["prop_id"] == "refresh-button.n_clicks":
+            dm.refresh_data()
+        selected = {i: set(p) for i, p in enumerate(parts) if p}
+        allowed_cases = dm.filter_cases_by_parts(selected)
+        options = [{"label": c, "value": c} for c in allowed_cases]
+        if current_vals:
+            new_vals = [c for c in current_vals if c in allowed_cases]
+        else:
+            new_vals = allowed_cases
+        return options, new_vals
+
+    @app.callback(
+        [
+            Output(f"case-part-{i}-filter", "options")
+            for i in range(1, NUM_CASE_PARTS + 1)
+        ],
+        Input("refresh-button", "n_clicks"),
+    )
+    def refresh_case_parts(n_clicks):
+        token_opts, _ = dm.get_case_token_info()
+        return [
+            [{"label": v, "value": v} for v in token_opts[i - 1]]
+            for i in range(1, NUM_CASE_PARTS + 1)
+        ]
 
     # Define callback for updating graphs and KPIs
     @app.callback(
@@ -268,7 +331,9 @@ def main() -> None:
         xaxis_choice,
         n_clicks,
     ):
-        dm.refresh_data()
+        ctx = callback_context
+        if ctx.triggered and ctx.triggered[0]["prop_id"] == "refresh-button.n_clicks":
+            dm.refresh_data()
         # Build filters dict for data_model
         filters = {
             "Case name": set(case_vals) if case_vals else None,

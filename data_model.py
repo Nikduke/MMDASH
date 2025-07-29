@@ -93,6 +93,52 @@ def refresh_data() -> None:
     get_data.cache_clear()
     get_filter_options.cache_clear()
     _cached_bus_names.cache_clear()
+    get_case_token_info.cache_clear()
+
+
+@functools.lru_cache(maxsize=1)
+def get_case_token_info() -> tuple[list[list[str]], dict[str, list[str]]]:
+    """Return token options and mapping for case names.
+
+    The CSV's ``Case name`` column contains structured tokens separated by
+    underscores. This function parses all unique case names and groups the
+    tokens by their position.
+
+    Returns
+    -------
+    tuple
+        ``(token_options, token_map)`` where ``token_options`` is a list of
+        unique values for each token position and ``token_map`` maps each case
+        name to its list of tokens (truncated to the shortest length).
+    """
+    df = get_data()
+    cases = sorted(df["Case name"].dropna().unique())
+    split_cases = [c.split("_") for c in cases]
+    if not split_cases:
+        return [], {}
+    min_len = min(len(parts) for parts in split_cases)
+    token_options: list[list[str]] = []
+    for idx in range(min_len):
+        token_options.append(sorted({parts[idx] for parts in split_cases}))
+    token_map = {case: parts[:min_len] for case, parts in zip(cases, split_cases)}
+    return token_options, token_map
+
+
+def filter_cases_by_parts(selected_parts: dict[int, set[str]]) -> list[str]:
+    """Return case names matching all selected token parts."""
+    options, token_map = get_case_token_info()
+    if not token_map:
+        return []
+    result = []
+    for case, tokens in token_map.items():
+        match = True
+        for idx, allowed in selected_parts.items():
+            if allowed and tokens[idx] not in allowed:
+                match = False
+                break
+        if match:
+            result.append(case)
+    return sorted(result)
 
 
 def _apply_filters(
