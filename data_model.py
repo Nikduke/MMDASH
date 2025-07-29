@@ -447,3 +447,28 @@ def get_ll_undervoltage(
         aggfunc="max",
     )
     return pivot.sort_index()
+
+
+def initial_voltage_by_case(filters: Optional[Dict[str, Iterable]] = None) -> pd.Series:
+    """Return maximum initial voltage indexed by ``Case_Bus``."""
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    value_col = "V0 [pu]" if "V0 [pu]" in df_filtered.columns else "LLs [pu]"
+    ser = df_filtered.groupby("Case_Bus")[value_col].max()
+    return ser.sort_index()
+
+
+def lg_uv_by_case(filters: Optional[Dict[str, Iterable]] = None) -> pd.Series:
+    """Return maximum single-phase RMS undervoltage indexed by ``Case_Bus``."""
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    ser = df_filtered.groupby("Case_Bus")["LG_UV"].max()
+    return ser.sort_index()
+
+
+def ll_uv_by_case(filters: Optional[Dict[str, Iterable]] = None) -> pd.Series:
+    """Return maximum line-to-line RMS undervoltage indexed by ``Case_Bus``."""
+    df = get_data()
+    df_filtered = _apply_filters(df, filters)
+    ser = df_filtered.groupby("Case_Bus")["LL_UV"].max()
+    return ser.sort_index()
