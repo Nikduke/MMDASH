@@ -69,7 +69,9 @@ def get_data() -> pd.DataFrame:
     return df
 
 
-def _apply_filters(df: pd.DataFrame, filters: Optional[Dict[str, Iterable]] = None) -> pd.DataFrame:
+def _apply_filters(
+    df: pd.DataFrame, filters: Optional[Dict[str, Iterable]] = None
+) -> pd.DataFrame:
     """Return a subset of ``df`` according to provided filters.
 
     Parameters
@@ -342,3 +344,26 @@ def get_filter_options() -> Dict[str, list]:
         except Exception:
             options[field] = sorted(values, key=str)
     return options
+
+
+def get_bus_names_for_voltage(voltage_list: Optional[Iterable]) -> list:
+    """Return sorted bus names matching any of the provided voltages.
+
+    Parameters
+    ----------
+    voltage_list : Iterable or None
+        One or more voltage levels. If ``None`` or empty, all bus names are
+        returned.
+
+    Returns
+    -------
+    list
+        Sorted unique bus names that have a ``Bus voltage [kV]`` present in
+        ``voltage_list``.
+    """
+    df = get_data()
+    if not voltage_list:
+        bus_names = df["Bus name"].unique()
+    else:
+        bus_names = df[df["Bus voltage [kV]"].isin(voltage_list)]["Bus name"].unique()
+    return sorted(bus_names)

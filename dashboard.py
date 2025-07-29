@@ -59,20 +59,6 @@ def build_layout() -> html.Div:
             ]
         )
     )
-    # Multi-select for Bus name
-    controls.append(
-        html.Div(
-            [
-                html.Label("Bus name"),
-                dcc.Dropdown(
-                    options=[{"label": v, "value": v} for v in options["Bus name"]],
-                    value=options["Bus name"],
-                    multi=True,
-                    id="bus-filter",
-                ),
-            ]
-        )
-    )
     # Multi-select for Fault type
     controls.append(
         html.Div(
@@ -107,7 +93,10 @@ def build_layout() -> html.Div:
             [
                 html.Label("Bus voltage [kV]"),
                 dcc.Dropdown(
-                    options=[{"label": str(v), "value": v} for v in options["Bus voltage [kV]"]],
+                    options=[
+                        {"label": str(v), "value": v}
+                        for v in options["Bus voltage [kV]"]
+                    ],
                     value=options["Bus voltage [kV]"],
                     multi=True,
                     id="voltage-filter",
@@ -137,6 +126,24 @@ def build_layout() -> html.Div:
         )
     )
 
+    # X-axis toggle
+    controls.append(
+        html.Div(
+            [
+                html.Label("X-axis"),
+                dcc.RadioItems(
+                    options=[
+                        {"label": "Run#", "value": "Run#"},
+                        {"label": "Tswitch_a [s]", "value": "Tswitch_a [s]"},
+                    ],
+                    value="Run#",
+                    id="xaxis-toggle",
+                    inline=True,
+                ),
+            ]
+        )
+    )
+
     # KPI container (empty, values filled via callback)
     kpi_container = html.Div(id="kpi-container", className="kpi-container")
 
@@ -144,22 +151,16 @@ def build_layout() -> html.Div:
     graph_ids = [
         "lg-inst-graph",
         "ll-inst-graph",
-        "lg-rms-over-graph",
-        "ll-rms-over-graph",
-        "lg-rms-under-graph",
-        "ll-rms-under-graph",
-        "initial-voltage-graph",
+        "lg-rms-graph",
+        "ll-rms-graph",
         "tov-dur-graph",
     ]
     graph_titles = [
-        "LG instantaneous overvoltages vs switching time",
-        "LL instantaneous overvoltages vs switching time",
-        "LG RMS overvoltages vs switching time",
-        "LL RMS overvoltages vs switching time",
-        "LG RMS undervoltages vs switching time",
-        "LL RMS undervoltages vs switching time",
-        "Initial voltages",
-        "TOV duration by run",
+        "LG instantaneous overvoltages",
+        "LL instantaneous overvoltages",
+        "LG RMS overvoltages",
+        "LL RMS overvoltages",
+        "TOV duration",
     ]
     graphs = []
     for g_id, title in zip(graph_ids, graph_titles):
@@ -198,29 +199,27 @@ def main() -> None:
             Output("kpi-container", "children"),
             Output("lg-inst-graph", "figure"),
             Output("ll-inst-graph", "figure"),
-            Output("lg-rms-over-graph", "figure"),
-            Output("ll-rms-over-graph", "figure"),
-            Output("lg-rms-under-graph", "figure"),
-            Output("ll-rms-under-graph", "figure"),
-            Output("initial-voltage-graph", "figure"),
+            Output("lg-rms-graph", "figure"),
+            Output("ll-rms-graph", "figure"),
             Output("tov-dur-graph", "figure"),
         ],
         [
             Input("case-filter", "value"),
-            Input("bus-filter", "value"),
             Input("fault-filter", "value"),
             Input("run-filter", "value"),
             Input("voltage-filter", "value"),
             Input("tswitch-filter", "value"),
+            Input("xaxis-toggle", "value"),
         ],
     )
     def update_all(
-        case_vals, bus_vals, fault_vals, run_vals, voltage_vals, tswitch_range
+        case_vals, fault_vals, run_vals, voltage_vals, tswitch_range, xaxis_choice
     ):
         # Build filters dict for data_model
+        bus_names = dm.get_bus_names_for_voltage(voltage_vals)
         filters = {
             "Case name": set(case_vals) if case_vals else None,
-            "Bus name": set(bus_vals) if bus_vals else None,
+            "Bus name": set(bus_names) if bus_names else None,
             "Fault_type": set(fault_vals) if fault_vals else None,
             "Run#": set(run_vals) if run_vals else None,
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
@@ -233,35 +232,48 @@ def main() -> None:
         # Compute KPIs
         def safe_max(series: pd.Series) -> float:
             return float(series.max()) if not series.empty else float("nan")
-        def safe_min(series: pd.Series) -> float:
-            return float(series.min()) if not series.empty else float("nan")
 
         kpi_cards = []
-        kpi_cards.append(create_kpi_card("Max LG instantaneous [pu]", safe_max(df_range["LGp [pu]"])) )
-        kpi_cards.append(create_kpi_card("Max LL instantaneous [pu]", safe_max(df_range["LLp [pu]"])) )
-        kpi_cards.append(create_kpi_card("Max LG RMS [pu]", safe_max(df_range["LGr [pu]"])) )
-        kpi_cards.append(create_kpi_card("Min LG RMS [pu]", safe_min(df_range["LGrm [pu]"])) )
-        kpi_cards.append(create_kpi_card("Max TOV duration [s]", safe_max(df_range["TOV_dur [s]"])) )
+        kpi_cards.append(
+            create_kpi_card("Max LG instantaneous [pu]", safe_max(df_range["LGp [pu]"]))
+        )
+        kpi_cards.append(
+            create_kpi_card("Max LL instantaneous [pu]", safe_max(df_range["LLp [pu]"]))
+        )
+        kpi_cards.append(
+            create_kpi_card("Max LG RMS [pu]", safe_max(df_range["LGr [pu]"]))
+        )
+        kpi_cards.append(
+            create_kpi_card("Max LL RMS [pu]", safe_max(df_range["LLr [pu]"]))
+        )
+        kpi_cards.append(
+            create_kpi_card("Max TOV duration [s]", safe_max(df_range["TOV_dur [s]"]))
+        )
 
         # Generate figures
-        fig_lg_inst = _pivot_to_line(dm.lg_inst_max(filters), "Tswitch_a [s]", "LGp [pu]")
-        fig_ll_inst = _pivot_to_line(dm.ll_inst_max(filters), "Tswitch_a [s]", "LLp [pu]")
-        fig_lg_rms_over = _pivot_to_line(dm.lg_rms_max(filters), "Tswitch_a [s]", "LGr [pu]")
-        fig_ll_rms_over = _pivot_to_line(dm.ll_rms_max(filters), "Tswitch_a [s]", "LLr [pu]")
-        fig_lg_rms_under = _pivot_to_line(dm.lg_rms_min(filters), "Tswitch_a [s]", "LGrm [pu]")
-        fig_ll_rms_under = _pivot_to_line(dm.ll_rms_min(filters), "Tswitch_a [s]", "LLrm [pu]")
-        fig_initial = _series_to_bar(dm.initial_conditions(filters))
-        fig_tov = _pivot_to_line(dm.tov_dur(filters), "Run#", "TOV_dur [s]")
+        def build_pivot(col: str) -> pd.DataFrame:
+            pivot = df_range.pivot_table(
+                index=xaxis_choice,
+                columns="Bus name",
+                values=col,
+                aggfunc="max",
+            )
+            return pivot.sort_index()
+
+        fig_lg_inst = _pivot_to_line(build_pivot("LGp [pu]"), xaxis_choice, "LGp [pu]")
+        fig_ll_inst = _pivot_to_line(build_pivot("LLp [pu]"), xaxis_choice, "LLp [pu]")
+        fig_lg_rms = _pivot_to_line(build_pivot("LGr [pu]"), xaxis_choice, "LGr [pu]")
+        fig_ll_rms = _pivot_to_line(build_pivot("LLr [pu]"), xaxis_choice, "LLr [pu]")
+        fig_tov = _pivot_to_line(
+            build_pivot("TOV_dur [s]"), xaxis_choice, "TOV_dur [s]"
+        )
 
         return (
             kpi_cards,
             fig_lg_inst,
             fig_ll_inst,
-            fig_lg_rms_over,
-            fig_ll_rms_over,
-            fig_lg_rms_under,
-            fig_ll_rms_under,
-            fig_initial,
+            fig_lg_rms,
+            fig_ll_rms,
             fig_tov,
         )
 
@@ -288,25 +300,7 @@ def _pivot_to_line(pivot: "pd.DataFrame", x_name: str, y_name: str) -> go.Figure
     fig.update_layout(
         xaxis_title=x_name,
         yaxis_title=y_name,
-        legend_title="Case_Bus",
-        height=400,
-        margin=dict(l=40, r=20, t=40, b=40),
-    )
-    return fig
-
-
-def _series_to_bar(series: "pd.Series") -> go.Figure:
-    """Convert a Series into a bar chart figure."""
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=series.index,
-            y=series.values,
-        )
-    )
-    fig.update_layout(
-        xaxis_title="Case_Bus",
-        yaxis_title="LLs [pu] (max)",
+        legend_title="Bus",
         height=400,
         margin=dict(l=40, r=20, t=40, b=40),
     )
