@@ -25,17 +25,38 @@ import plotly.graph_objects as go
 
 import data_model as dm
 import pandas as pd
+import numpy as np
 
 
-def create_kpi_card(title: str, value: float, unit: str = "") -> html.Div:
-    """Helper to generate a simple KPI card with a title and value."""
-    return html.Div(
-        [
-            html.Div(title, className="kpi-title"),
-            html.Div(f"{value:.3f}{unit}", className="kpi-value"),
-        ],
-        className="kpi-card",
+def create_kpi_table(rows: list[dict]) -> html.Table:
+    """Return an HTML table summarizing KPI metrics."""
+    header = html.Thead(
+        html.Tr(
+            [
+                html.Th("Metric"),
+                html.Th("Value"),
+                html.Th("Case name"),
+                html.Th("Bus name"),
+                html.Th("Run#"),
+            ]
+        )
     )
+    body_rows = []
+    for row in rows:
+        body_rows.append(
+            html.Tr(
+                [
+                    html.Td(row["Metric"]),
+                    html.Td(
+                        f"{row['Value']:.3f}" if row["Value"] == row["Value"] else "n/a"
+                    ),
+                    html.Td(row.get("Case name", "")),
+                    html.Td(row.get("Bus name", "")),
+                    html.Td(str(row.get("Run#", ""))),
+                ]
+            )
+        )
+    return html.Table([header, html.Tbody(body_rows)], className="kpi-table")
 
 
 def build_layout() -> html.Div:
@@ -104,6 +125,21 @@ def build_layout() -> html.Div:
             ]
         )
     )
+    # Multi-select for Bus name (populated based on voltage)
+    initial_bus = dm.get_bus_names_for_voltage(options["Bus voltage [kV]"])
+    controls.append(
+        html.Div(
+            [
+                html.Label("Bus name"),
+                dcc.Dropdown(
+                    options=[{"label": b, "value": b} for b in initial_bus],
+                    value=initial_bus,
+                    multi=True,
+                    id="bus-filter",
+                ),
+            ]
+        )
+    )
     # Range slider for Tswitch_a [s]
     tswitch_a_values = options["Tswitch_a [s]"]
     if tswitch_a_values:
@@ -116,11 +152,12 @@ def build_layout() -> html.Div:
                 html.Label("Tswitch_a [s] range"),
                 dcc.RangeSlider(
                     id="tswitch-filter",
-                    min=min_ts,
-                    max=max_ts,
-                    value=[min_ts, max_ts],
-                    step=(max_ts - min_ts) / max(1, len(tswitch_a_values) - 1),
-                    tooltip={"always_visible": False, "placement": "top"},
+                    min=round(min_ts, 3),
+                    max=round(max_ts, 3),
+                    value=[round(min_ts, 3), round(max_ts, 3)],
+                    step=None,
+                    marks={round(v, 3): f"{v:.3f}" for v in tswitch_a_values},
+                    tooltip={"always_visible": False, "placement": "bottom"},
                 ),
             ]
         )
@@ -189,9 +226,23 @@ def build_layout() -> html.Div:
 
 def main() -> None:
     """Entry point for running the Dash application."""
-    app = Dash(__name__)
+    app = Dash(
+        __name__,
+        external_stylesheets=[
+            "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+        ],
+    )
     app.title = "Overvoltage Dashboard"
     app.layout = build_layout()
+
+    @app.callback(
+        [Output("bus-filter", "options"), Output("bus-filter", "value")],
+        Input("voltage-filter", "value"),
+    )
+    def update_bus_options(selected_voltages):
+        bus_names = dm.get_bus_names_for_voltage(selected_voltages)
+        opts = [{"label": b, "value": b} for b in bus_names]
+        return opts, bus_names
 
     # Define callback for updating graphs and KPIs
     @app.callback(
@@ -208,18 +259,24 @@ def main() -> None:
             Input("fault-filter", "value"),
             Input("run-filter", "value"),
             Input("voltage-filter", "value"),
+            Input("bus-filter", "value"),
             Input("tswitch-filter", "value"),
             Input("xaxis-toggle", "value"),
         ],
     )
     def update_all(
-        case_vals, fault_vals, run_vals, voltage_vals, tswitch_range, xaxis_choice
+        case_vals,
+        fault_vals,
+        run_vals,
+        voltage_vals,
+        bus_vals,
+        tswitch_range,
+        xaxis_choice,
     ):
         # Build filters dict for data_model
-        bus_names = dm.get_bus_names_for_voltage(voltage_vals)
         filters = {
             "Case name": set(case_vals) if case_vals else None,
-            "Bus name": set(bus_names) if bus_names else None,
+            "Bus name": set(bus_vals) if bus_vals else None,
             "Fault_type": set(fault_vals) if fault_vals else None,
             "Run#": set(run_vals) if run_vals else None,
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
@@ -229,47 +286,91 @@ def main() -> None:
         df_range = df[df["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])]
         df_range = dm._apply_filters(df_range, filters)
 
-        # Compute KPIs
-        def safe_max(series: pd.Series) -> float:
-            return float(series.max()) if not series.empty else float("nan")
+        metrics = {
+            "Max LG instantaneous": "LGp [pu]",
+            "Max LL instantaneous": "LLp [pu]",
+            "Max LG RMS": "LGr [pu]",
+            "Max LL RMS": "LLr [pu]",
+            "Max TOV duration": "TOV_dur [s]",
+        }
+        kpi_rows = []
+        for name, col in metrics.items():
+            if df_range.empty:
+                kpi_rows.append(
+                    {
+                        "Metric": name,
+                        "Value": float("nan"),
+                        "Case name": "",
+                        "Bus name": "",
+                        "Run#": "",
+                    }
+                )
+                continue
+            idx = df_range[col].idxmax()
+            row = df_range.loc[idx]
+            kpi_rows.append(
+                {
+                    "Metric": name,
+                    "Value": row[col],
+                    "Case name": row["Case name"],
+                    "Bus name": row["Bus name"],
+                    "Run#": row["Run#"],
+                }
+            )
 
-        kpi_cards = []
-        kpi_cards.append(
-            create_kpi_card("Max LG instantaneous [pu]", safe_max(df_range["LGp [pu]"]))
-        )
-        kpi_cards.append(
-            create_kpi_card("Max LL instantaneous [pu]", safe_max(df_range["LLp [pu]"]))
-        )
-        kpi_cards.append(
-            create_kpi_card("Max LG RMS [pu]", safe_max(df_range["LGr [pu]"]))
-        )
-        kpi_cards.append(
-            create_kpi_card("Max LL RMS [pu]", safe_max(df_range["LLr [pu]"]))
-        )
-        kpi_cards.append(
-            create_kpi_card("Max TOV duration [s]", safe_max(df_range["TOV_dur [s]"]))
-        )
+        kpi_table = create_kpi_table(kpi_rows)
 
         # Generate figures
-        def build_pivot(col: str) -> pd.DataFrame:
-            pivot = df_range.pivot_table(
-                index=xaxis_choice,
-                columns="Bus name",
-                values=col,
-                aggfunc="max",
+        def build_fig(col: str, y_label: str) -> go.Figure:
+            fig = go.Figure()
+            for case_bus, group in df_range.groupby("Case_Bus"):
+                case = group["Case name"].iloc[0]
+                bus = group["Bus name"].iloc[0]
+                d = (
+                    group.groupby(xaxis_choice)
+                    .agg({col: "max", "Run#": "first"})
+                    .reset_index()
+                    .sort_values(xaxis_choice)
+                )
+                customdata = np.stack(
+                    [
+                        np.full(len(d), case),
+                        np.full(len(d), bus),
+                        d["Run#"],
+                    ],
+                    axis=-1,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=d[xaxis_choice],
+                        y=d[col],
+                        mode="lines+markers",
+                        name=f"{case}-{bus}",
+                        customdata=customdata,
+                        hovertemplate="Case name: %{customdata[0]}<br>"
+                        "Bus name: %{customdata[1]}<br>"
+                        "Run#: %{customdata[2]}<br>"
+                        + y_label
+                        + ": %{y:.3f}<extra></extra>",
+                    )
+                )
+            fig.update_layout(
+                xaxis_title=xaxis_choice,
+                yaxis_title=y_label,
+                legend_title="Case-Bus",
+                height=400,
+                margin=dict(l=40, r=20, t=40, b=40),
             )
-            return pivot.sort_index()
+            return fig
 
-        fig_lg_inst = _pivot_to_line(build_pivot("LGp [pu]"), xaxis_choice, "LGp [pu]")
-        fig_ll_inst = _pivot_to_line(build_pivot("LLp [pu]"), xaxis_choice, "LLp [pu]")
-        fig_lg_rms = _pivot_to_line(build_pivot("LGr [pu]"), xaxis_choice, "LGr [pu]")
-        fig_ll_rms = _pivot_to_line(build_pivot("LLr [pu]"), xaxis_choice, "LLr [pu]")
-        fig_tov = _pivot_to_line(
-            build_pivot("TOV_dur [s]"), xaxis_choice, "TOV_dur [s]"
-        )
+        fig_lg_inst = build_fig("LGp [pu]", "LGp [pu]")
+        fig_ll_inst = build_fig("LLp [pu]", "LLp [pu]")
+        fig_lg_rms = build_fig("LGr [pu]", "LGr [pu]")
+        fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
+        fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
 
         return (
-            kpi_cards,
+            kpi_table,
             fig_lg_inst,
             fig_ll_inst,
             fig_lg_rms,
@@ -285,26 +386,6 @@ def main() -> None:
     except AttributeError:
         # Fallback for older Dash versions
         app.run_server(debug=False)
-
-
-def _pivot_to_line(pivot: "pd.DataFrame", x_name: str, y_name: str) -> go.Figure:
-    """Convert a wide pivot DataFrame into a line chart figure."""
-    fig = go.Figure()
-    for col in pivot.columns:
-        series = pivot[col].dropna()
-        if series.empty:
-            continue
-        fig.add_trace(
-            go.Scatter(x=series.index, y=series.values, mode="lines", name=col)
-        )
-    fig.update_layout(
-        xaxis_title=x_name,
-        yaxis_title=y_name,
-        legend_title="Bus",
-        height=400,
-        margin=dict(l=40, r=20, t=40, b=40),
-    )
-    return fig
 
 
 if __name__ == "__main__":
