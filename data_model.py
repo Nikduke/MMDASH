@@ -44,6 +44,16 @@ from typing import Dict, Iterable, Optional, Set
 
 import pandas as pd
 
+# Columns used throughout the dashboard
+_METRIC_COLS = [
+    "LGp [pu]",
+    "LLp [pu]",
+    "LGr [pu]",
+    "LLr [pu]",
+    "TOV_dur [s]",
+    "LLs [pu]",
+]
+
 CSV_PATH = "MM results.csv"
 
 
@@ -61,11 +71,20 @@ def get_data() -> pd.DataFrame:
         The loaded data with an additional ``Case_Bus`` column.
     """
     df = pd.read_csv(CSV_PATH)
-    # Construct composite key for column dimension.  Excel appears to
-    # concatenate parts of the case and bus identifiers (e.g., C21_S1_230HF2).
-    # Here we simply join ``Case name`` and ``Bus name`` with an underscore.
     df = df.copy()
+    # Round switching time once to avoid repeated float comparisons
+    if "Tswitch_a [s]" in df.columns:
+        df["Tswitch_a [s]"] = df["Tswitch_a [s]"].round(3)
+
+    # Construct composite key for column dimension
     df["Case_Bus"] = df["Case name"].astype(str) + "_" + df["Bus name"].astype(str)
+
+    # Pre-compute undervoltage columns used in several graphs
+    if "LGr [pu]" in df.columns:
+        df["LG_UV"] = 1 - df["LGr [pu]"]
+    if "LLr [pu]" in df.columns:
+        df["LL_UV"] = 1 - df["LLr [pu]"]
+
     return df
 
 
@@ -311,6 +330,7 @@ def tov_dur(filters: Optional[Dict[str, Iterable]] = None) -> pd.DataFrame:
     return pivot.sort_index()
 
 
+@functools.lru_cache(maxsize=1)
 def get_filter_options() -> Dict[str, list]:
     """Compute unique values for each supported filter field.
 
@@ -347,25 +367,22 @@ def get_filter_options() -> Dict[str, list]:
 
 
 def get_bus_names_for_voltage(voltage_list: Optional[Iterable]) -> list:
-    """Return sorted bus names matching any of the provided voltages.
+    """Return sorted bus names matching any of the provided voltages."""
 
-    Parameters
-    ----------
-    voltage_list : Iterable or None
-        One or more voltage levels. If ``None`` or empty, all bus names are
-        returned.
-
-    Returns
-    -------
-    list
-        Sorted unique bus names that have a ``Bus voltage [kV]`` present in
-        ``voltage_list``.
-    """
-    df = get_data()
     if not voltage_list:
+        key = None
+    else:
+        key = tuple(sorted(voltage_list))
+    return _cached_bus_names(key)
+
+
+@functools.lru_cache(maxsize=32)
+def _cached_bus_names(voltage_tuple: Optional[tuple]) -> list:
+    df = get_data()
+    if voltage_tuple is None:
         bus_names = df["Bus name"].unique()
     else:
-        bus_names = df[df["Bus voltage [kV]"].isin(voltage_list)]["Bus name"].unique()
+        bus_names = df[df["Bus voltage [kV]"].isin(voltage_tuple)]["Bus name"].unique()
     return sorted(bus_names)
 
 
@@ -407,8 +424,6 @@ def get_lg_undervoltage(
     """Return a pivot of single-phase RMS undervoltages (1 - LGr)."""
     df = get_data()
     df_filtered = _apply_filters(df, filters)
-    df_filtered = df_filtered.copy()
-    df_filtered["LG_UV"] = 1 - df_filtered["LGr [pu]"]
     pivot = df_filtered.pivot_table(
         index=x_axis,
         columns="Bus name",
@@ -425,8 +440,6 @@ def get_ll_undervoltage(
     """Return a pivot of line-to-line RMS undervoltages (1 - LLr)."""
     df = get_data()
     df_filtered = _apply_filters(df, filters)
-    df_filtered = df_filtered.copy()
-    df_filtered["LL_UV"] = 1 - df_filtered["LLr [pu]"]
     pivot = df_filtered.pivot_table(
         index=x_axis,
         columns="Bus name",

@@ -290,10 +290,21 @@ def main() -> None:
             "Run#": set(run_vals) if run_vals else None,
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
         }
-        # Filter by Tswitch_a range separately
         df = dm.get_data()
         df_range = df[df["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])]
         df_range = dm._apply_filters(df_range, filters)
+        if df_range.empty:
+            return (
+                create_kpi_table([]),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+            )
 
         metrics = {
             "Max LG instantaneous": "LGp [pu]",
@@ -304,17 +315,6 @@ def main() -> None:
         }
         kpi_rows = []
         for name, col in metrics.items():
-            if df_range.empty:
-                kpi_rows.append(
-                    {
-                        "Metric": name,
-                        "Value": float("nan"),
-                        "Case name": "",
-                        "Bus name": "",
-                        "Run#": "",
-                    }
-                )
-                continue
             idx = df_range[col].idxmax()
             row = df_range.loc[idx]
             kpi_rows.append(
@@ -329,30 +329,41 @@ def main() -> None:
 
         kpi_table = create_kpi_table(kpi_rows)
 
-        # Generate figures
+        # Aggregate once for all metrics to minimize repeated grouping
+        agg_cols = {
+            "LGp [pu]": "max",
+            "LLp [pu]": "max",
+            "LGr [pu]": "max",
+            "LLr [pu]": "max",
+            "TOV_dur [s]": "max",
+            "LLs [pu]": "max",
+            "LG_UV": "max",
+            "LL_UV": "max",
+            "Run#": "first",
+            "Case name": "first",
+            "Bus name": "first",
+        }
+        grouped = (
+            df_range.groupby(["Case_Bus", xaxis_choice]).agg(agg_cols).reset_index()
+        )
+
         def build_fig(col: str, y_label: str) -> go.Figure:
             fig = go.Figure()
-            for case_bus, group in df_range.groupby("Case_Bus"):
-                case = group["Case name"].iloc[0]
-                bus = group["Bus name"].iloc[0]
-                d = (
-                    group.groupby(xaxis_choice)
-                    .agg({col: "max", "Run#": "first"})
-                    .reset_index()
-                    .sort_values(xaxis_choice)
-                )
+            for case_bus, sub in grouped.groupby("Case_Bus"):
+                case = sub["Case name"].iloc[0]
+                bus = sub["Bus name"].iloc[0]
                 customdata = np.stack(
                     [
-                        np.full(len(d), case),
-                        np.full(len(d), bus),
-                        d["Run#"],
+                        np.full(len(sub), case),
+                        np.full(len(sub), bus),
+                        sub["Run#"],
                     ],
                     axis=-1,
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=d[xaxis_choice],
-                        y=d[col],
+                        x=sub[xaxis_choice],
+                        y=sub[col],
                         mode="lines+markers",
                         name=f"{case}-{bus}",
                         customdata=customdata,
@@ -378,8 +389,6 @@ def main() -> None:
         fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
         fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
         fig_v0 = build_fig("LLs [pu]", "V0 [pu]")
-        df_range["LG_UV"] = 1 - df_range["LGr [pu]"]
-        df_range["LL_UV"] = 1 - df_range["LLr [pu]"]
         fig_lg_uv = build_fig("LG_UV", "1 - LGr [pu]")
         fig_ll_uv = build_fig("LL_UV", "1 - LLr [pu]")
 
