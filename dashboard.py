@@ -19,7 +19,8 @@ Then open http://127.0.0.1:8050 in a web browser.
 
 from __future__ import annotations
 
-from dash import Dash, dcc, html, Input, Output, State, callback_context
+from dash import Dash, dcc, html, Input, Output, callback_context, dash_table
+from dash.dash_table import Format
 import plotly.graph_objects as go
 
 import data_model as dm
@@ -60,10 +61,48 @@ def create_kpi_table(rows: list[dict]) -> html.Table:
     return html.Table([header, html.Tbody(body_rows)], className="kpi-table")
 
 
+def create_summary_table(df) -> dash_table.DataTable:
+    """Return a DataTable summarizing maximum metrics by voltage level."""
+
+    columns = [
+        {"name": "Metric", "id": "Metric"},
+        {
+            "name": "Value",
+            "id": "Value",
+            "type": "numeric",
+            "format": Format.Format(precision=3, scheme=Format.Scheme.fixed),
+        },
+        {
+            "name": "Bus voltage [kV]",
+            "id": "Bus voltage [kV]",
+            "type": "numeric",
+            "format": Format.Format(precision=0, scheme=Format.Scheme.fixed),
+        },
+        {"name": "Case name", "id": "Case name"},
+        {"name": "Bus name", "id": "Bus name"},
+        {
+            "name": "Run#",
+            "id": "Run#",
+            "type": "numeric",
+            "format": Format.Format(precision=1, scheme=Format.Scheme.fixed),
+        },
+    ]
+    return dash_table.DataTable(
+        data=df.to_dict("records"),
+        columns=columns,
+        style_table={"overflowX": "auto"},
+        style_cell={"textAlign": "left", "padding": "4px"},
+        style_header={"backgroundColor": "#f0f0f0", "fontWeight": "bold"},
+        id="summary-table",
+    )
+
+
 def build_layout() -> html.Div:
     """Construct the Dash layout."""
     # Fetch filter options
     options = dm.get_filter_options()
+    summary_df = dm.summary_metrics_by_voltage()
+    summary_table = create_summary_table(summary_df)
 
     # Create dropdowns for each filter
     controls = []
@@ -230,6 +269,7 @@ def build_layout() -> html.Div:
             html.H1("Overvoltage Dashboard"),
             html.Div(controls, className="controls"),
             kpi_container,
+            html.Div(summary_table, id="summary-metrics"),
             html.Div(graphs, className="graphs"),
         ],
         className="container",
