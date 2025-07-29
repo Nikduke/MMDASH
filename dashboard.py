@@ -19,12 +19,10 @@ Then open http://127.0.0.1:8050 in a web browser.
 
 from __future__ import annotations
 
-import dash
 from dash import Dash, dcc, html, Input, Output
 import plotly.graph_objects as go
 
 import data_model as dm
-import pandas as pd
 import numpy as np
 
 
@@ -201,9 +199,9 @@ def build_layout() -> html.Div:
         "LG RMS overvoltages",
         "LL RMS overvoltages",
         "TOV duration",
-        "Initial Voltage [pu] vs Switching Time",
-        "LG RMS Undervoltage [pu] vs Switching Time",
-        "LL RMS Undervoltage [pu] vs Switching Time",
+        "Initial Voltage [pu] vs Case_Bus",
+        "LG RMS Undervoltage [pu] vs Case_Bus",
+        "LL RMS Undervoltage [pu] vs Case_Bus",
     ]
     graphs = []
     for g_id, title in zip(graph_ids, graph_titles):
@@ -343,8 +341,12 @@ def main() -> None:
             "Case name": "first",
             "Bus name": "first",
         }
+        x_col = "Run#" if xaxis_choice == "Run#" else "Tswitch_a [s]"
         grouped = (
-            df_range.groupby(["Case_Bus", xaxis_choice]).agg(agg_cols).reset_index()
+            df_range.groupby(["Case_Bus", x_col])
+            .agg(agg_cols)
+            .reset_index()
+            .rename(columns={x_col: "x"})
         )
 
         def build_fig(col: str, y_label: str) -> go.Figure:
@@ -362,7 +364,7 @@ def main() -> None:
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=sub[xaxis_choice],
+                        x=sub["x"],
                         y=sub[col],
                         mode="lines+markers",
                         name=f"{case}-{bus}",
@@ -383,14 +385,42 @@ def main() -> None:
             )
             return fig
 
+        def build_case_fig(col: str, y_label: str) -> go.Figure:
+            idx = df_range.groupby("Case_Bus")[col].idxmax()
+            rows = df_range.loc[idx].sort_values("Case_Bus")
+            customdata = np.stack(
+                [rows["Case name"], rows["Bus name"], rows["Run#"]],
+                axis=-1,
+            )
+            fig = go.Figure(
+                data=go.Scatter(
+                    x=rows["Case_Bus"],
+                    y=rows[col],
+                    mode="markers",
+                    customdata=customdata,
+                    hovertemplate="Case name: %{customdata[0]}<br>"
+                    "Bus name: %{customdata[1]}<br>"
+                    "Run#: %{customdata[2]}<br>"
+                    + y_label
+                    + ": %{y:.3f}<extra></extra>",
+                )
+            )
+            fig.update_layout(
+                xaxis_title="Case_Bus",
+                yaxis_title=y_label,
+                height=400,
+                margin=dict(l=40, r=20, t=40, b=40),
+            )
+            return fig
+
         fig_lg_inst = build_fig("LGp [pu]", "LGp [pu]")
         fig_ll_inst = build_fig("LLp [pu]", "LLp [pu]")
         fig_lg_rms = build_fig("LGr [pu]", "LGr [pu]")
         fig_ll_rms = build_fig("LLr [pu]", "LLr [pu]")
         fig_tov = build_fig("TOV_dur [s]", "TOV_dur [s]")
-        fig_v0 = build_fig("LLs [pu]", "V0 [pu]")
-        fig_lg_uv = build_fig("LG_UV", "1 - LGr [pu]")
-        fig_ll_uv = build_fig("LL_UV", "1 - LLr [pu]")
+        fig_v0 = build_case_fig("LLs [pu]", "V0 [pu]")
+        fig_lg_uv = build_case_fig("LG_UV", "1 - LGr [pu]")
+        fig_ll_uv = build_case_fig("LL_UV", "1 - LLr [pu]")
 
         return (
             kpi_table,
