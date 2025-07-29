@@ -525,3 +525,43 @@ def ll_uv_by_case(filters: Optional[Dict[str, Iterable]] = None) -> pd.Series:
     df_filtered = _apply_filters(df, filters)
     ser = df_filtered.groupby("Case_Bus")["LL_UV"].max()
     return ser.sort_index()
+
+
+@functools.lru_cache(maxsize=1)
+def summary_metrics_by_voltage() -> pd.DataFrame:
+    """Return maximum overvoltage metrics grouped by bus voltage level.
+
+    The resulting table has one row per metric per voltage level with the
+    corresponding case, bus name and run number where the maximum occurred.
+    """
+
+    df = get_data()
+    metrics = {
+        "Max LG instantaneous": "LGp [pu]",
+        "Max LL instantaneous": "LLp [pu]",
+        "Max LG RMS": "LGr [pu]",
+        "Max LL RMS": "LLr [pu]",
+        "Max TOV duration [s]": "TOV_dur [s]",
+    }
+
+    results: list[dict] = []
+    for voltage, group in df.groupby("Bus voltage [kV]"):
+        for metric, col in metrics.items():
+            idx = group[col].idxmax()
+            row = group.loc[idx]
+            results.append(
+                {
+                    "Metric": metric,
+                    "Value": row[col],
+                    "Bus voltage [kV]": voltage,
+                    "Case name": row["Case name"],
+                    "Bus name": row["Bus name"],
+                    "Run#": row["Run#"],
+                }
+            )
+
+    order = list(metrics.keys())
+    df_res = pd.DataFrame(results)
+    df_res["Metric"] = pd.Categorical(df_res["Metric"], categories=order, ordered=True)
+    df_res = df_res.sort_values(["Bus voltage [kV]", "Metric"]).reset_index(drop=True)
+    return df_res
