@@ -274,6 +274,7 @@ def build_layout() -> html.Div:
         ],
         className="container",
     )
+
     return layout
 
 
@@ -287,6 +288,26 @@ def main() -> None:
     )
     app.title = "Overvoltage Dashboard"
     app.layout = build_layout()
+
+    # ------------ NEW CALLBACKS ------------
+
+    # 1. Disable/enable the Tswitch slider depending on the chosen X-axis
+    @app.callback(
+        Output("tswitch-filter", "disabled"),
+        Input("xaxis-toggle", "value"),
+    )
+    def _toggle_tswitch_slider(axis_choice):
+        return axis_choice == "Run#"
+
+    # 2. Keep the summary table in sync when the data is reloaded
+    @app.callback(
+        Output("summary-table", "data"),
+        Input("refresh-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _refresh_summary(_):
+        dm.refresh_data()
+        return dm.summary_metrics_by_voltage().to_dict("records")
 
     @app.callback(
         [Output("bus-filter", "options"), Output("bus-filter", "value")],
@@ -371,9 +392,12 @@ def main() -> None:
         xaxis_choice,
         n_clicks,
     ):
-        ctx = callback_context
-        if ctx.triggered and ctx.triggered[0]["prop_id"] == "refresh-button.n_clicks":
+        # Ensure fresh data **before** we grab it
+        if callback_context.triggered and (
+            callback_context.triggered[0]["prop_id"] == "refresh-button.n_clicks"
+        ):
             dm.refresh_data()
+
         # Build filters dict for data_model
         filters = {
             "Case name": set(case_vals) if case_vals else None,
@@ -381,11 +405,17 @@ def main() -> None:
             "Fault_type": set(fault_vals) if fault_vals else None,
             "Bus voltage [kV]": set(voltage_vals) if voltage_vals else None,
         }
+
         df = dm.get_data()
-        df_range = dm._apply_filters(df, filters)
-        df_range = df_range[
-            df_range["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])
-        ]
+        df_filtered = dm._apply_filters(df, filters)
+
+        # Only slice by Tswitch when Tswitch is actually on the X-axis.
+        if xaxis_choice == "Run#":
+            df_range = df_filtered
+        else:
+            df_range = df_filtered[
+                df_filtered["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])
+            ]
         if df_range.empty:
             return (
                 create_kpi_table([]),
