@@ -79,6 +79,10 @@ def get_data() -> pd.DataFrame:
     # Construct composite key for column dimension
     df["Case_Bus"] = df["Case name"].astype(str) + "_" + df["Bus name"].astype(str)
 
+    # Normalise the Run column so downstream code can safely treat it as an integer
+    if "Run#" in df.columns:
+        df["Run#"] = df["Run#"].astype(int)
+
     # Pre-compute undervoltage columns used in several graphs
     if "LGr [pu]" in df.columns:
         df["LG_UV"] = 1 - df["LGr [pu]"]
