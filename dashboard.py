@@ -289,7 +289,7 @@ def main() -> None:
     app.title = "Overvoltage Dashboard"
     app.layout = build_layout()
 
-    # ------------ NEW CALLBACKS ------------
+    # -------- NEW CALLBACKS --------
 
     # 1. Disable/enable the Tswitch slider depending on the chosen X-axis
     @app.callback(
@@ -409,13 +409,24 @@ def main() -> None:
         df = dm.get_data()
         df_filtered = dm._apply_filters(df, filters)
 
-        # Only slice by Tswitch when Tswitch is actually on the X-axis.
-        if xaxis_choice == "Run#":
-            df_range = df_filtered
-        else:
+        # Cast Run# to int for cleaner X-axis values
+        if "Run#" in df_filtered.columns:
+            df_filtered["Run#"] = df_filtered["Run#"].astype(int)
+
+        # Apply Tswitch slice **only** when Tswitch is the chosen X-axis
+        if (
+            xaxis_choice == "Tswitch_a [s]"
+            and tswitch_range
+            and isinstance(tswitch_range, (list, tuple))
+            and len(tswitch_range) == 2
+        ):
             df_range = df_filtered[
-                df_filtered["Tswitch_a [s]"].between(tswitch_range[0], tswitch_range[1])
+                df_filtered["Tswitch_a [s]"].between(
+                    tswitch_range[0], tswitch_range[1]
+                )
             ]
+        else:
+            df_range = df_filtered
         if df_range.empty:
             return (
                 create_kpi_table([]),
